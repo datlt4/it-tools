@@ -61,6 +61,24 @@ onMounted(() => {
     modified: monaco.editor.createModel('modified text', 'txt'),
   });
 });
+
+function getOriginalValue(): string {
+  return editor?.getOriginalEditor().getValue() ?? '';
+}
+
+function getModifiedValue(): string {
+  return editor?.getModifiedEditor().getValue() ?? '';
+}
+
+function setOriginalValue(value: string) {
+  editor?.getOriginalEditor().setValue(value);
+}
+
+function setModifiedValue(value: string) {
+  editor?.getModifiedEditor().setValue(value);
+}
+
+defineExpose({ getOriginalValue, getModifiedValue, setOriginalValue, setModifiedValue });
 </script>
 
 <template>
