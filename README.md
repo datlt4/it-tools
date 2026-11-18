@@ -18,6 +18,18 @@ You have an idea of a tool? Submit a [feature request](https://github.com/Corent
 
 Self host solutions for your homelab
 
+**Frontend + converter backend (khuyên dùng cho fork này):**
+
+```sh
+docker compose up --build
+# frontend: http://localhost:8080
+# api: http://localhost:8000/health
+# đổi backend: VITE_CONVERTER_API_URL=https://converter.example.com docker compose up --build
+```
+
+Backend riêng (`./server`, FastAPI + LibreOffice + ffmpeg + PyMuPDF) xử lý Office→PDF, PDF→text/ảnh, media file lớn.
+Tool image/audio/video/PDF cơ bản chạy 100% client-side nên vẫn dùng được khi backend offline.
+
 **From docker hub:**
 
 ```sh

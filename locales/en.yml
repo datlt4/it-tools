@@ -29,21 +29,24 @@ home:
     mode: 'Toggle dark/light mode'
 about:
   content: >
-    # About IT-Tools
+    # About IT-Tools (datlt4 fork)
 
-    This wonderful website, made with ❤ by [Corentin Thomasset](https://corentin.tech?utm_source=it-tools&utm_medium=about) , aggregates useful tools for developer and people working in IT. If you find it useful, please feel free to share it to people you think may find it useful too and don't forget to bookmark it in your shortcut bar!
+    This site is a fork of [IT-Tools by Corentin Thomasset](https://github.com/CorentinTh/it-tools) — the wonderful open-source (GPL-3.0) collection of handy tools for developers and IT people. Upstream credit stays with the original author.
 
-    IT Tools is open-source (under the GPL-3.0 license) and free, and will always be, but it costs me money to host and renew the domain name. If you want to support my work, and encourage me to add more tools, please consider supporting by [sponsoring me](https://www.buymeacoffee.com/cthmsst).
+    ## What's new in this fork
+
+    - **Media tools**: image converter (convert/resize/compress/rotate), audio converter (mp3/wav/ogg/m4a/flac, trim, merge) and video converter (mp4/webm, trim, CRF control, merge in order, mp3 extract, GIF) — all client-side via Canvas and ffmpeg.wasm.
+    - **PDF toolbox**: merge, split by page range, rotate and images-to-PDF, 100% client-side.
+    - **Document converter + self-hosted converter backend** (FastAPI + LibreOffice + ffmpeg + PyMuPDF): Office→PDF, PDF→text/images, and long-running media **jobs with progress bar, pause / resume / cancel** from the navbar job button.
+    - Rebranded to a purple-pink theme.
 
     ## Technologies
 
-    IT Tools is made in Vue.js (Vue 3) with the the Naive UI component library and is hosted and continuously deployed by Vercel. Third-party open-source libraries are used in some tools, you may find the complete list in the [package.json](https://github.com/CorentinTh/it-tools/blob/main/package.json) file of the repository.
+    Vue.js (Vue 3) + Naive UI frontend, deployable as static files (nginx). Optional `server/` backend for heavy conversions. Third-party open-source libraries are listed in the [package.json](https://github.com/datlt4/it-tools/blob/main/package.json) file of the repository.
 
     ## Found a bug? A tool is missing?
 
-    If you need a tool that is currently not present here, and you think can be useful, you are welcome to submit a feature request in the [issues section](https://github.com/CorentinTh/it-tools/issues/new/choose) in the GitHub repository.
-
-    And if you found a bug, or something doesn't work as expected, please file a bug report in the [issues section](https://github.com/CorentinTh/it-tools/issues/new/choose) in the GitHub repository.
+    Open a feature request or bug report in the [issues section](https://github.com/datlt4/it-tools/issues/new/choose) in the GitHub repository.
 
 404:
   notFound: '404 Not Found'
@@ -392,3 +395,19 @@ tools:
   text-to-binary:
     title: Text to ASCII binary
     description: Convert text to its ASCII binary representation and vice-versa.
+
+  image-converter:
+    title: Image converter
+    description: Convert PNG/JPG/WEBP, resize, compress and rotate images client-side.
+  audio-converter:
+    title: Audio converter
+    description: Convert mp3/wav/ogg/m4a/flac, trim and merge audio with ffmpeg.wasm.
+  video-converter:
+    title: Video converter
+    description: Convert mp4/webm, trim, extract mp3 and create GIF client-side.
+  pdf-toolbox:
+    title: PDF toolbox
+    description: Merge, split, rotate PDFs and create PDF from images client-side.
+  document-converter:
+    title: Document converter
+    description: Text/MD to PDF locally, Office to PDF and PDF to text/images via backend.

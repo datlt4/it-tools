@@ -2,6 +2,11 @@ import { tool as base64FileConverter } from './base64-file-converter';
 import { tool as base64StringConverter } from './base64-string-converter';
 import { tool as basicAuthGenerator } from './basic-auth-generator';
 import { tool as emailNormalizer } from './email-normalizer';
+import { tool as imageConverter } from './image-converter';
+import { tool as audioConverter } from './audio-converter';
+import { tool as videoConverter } from './video-converter';
+import { tool as pdfToolbox } from './pdf-toolbox';
+import { tool as documentConverter } from './document-converter';
 
 import { tool as asciiTextDrawer } from './ascii-text-drawer';
 
@@ -141,7 +146,11 @@ export const toolsByCategory: ToolCategory[] = [
   },
   {
     name: 'Images and videos',
-    components: [qrCodeGenerator, wifiQrCodeGenerator, svgPlaceholderGenerator, cameraRecorder],
+    components: [qrCodeGenerator, wifiQrCodeGenerator, svgPlaceholderGenerator, cameraRecorder, imageConverter, audioConverter, videoConverter],
+  },
+  {
+    name: 'PDF & Documents',
+    components: [pdfToolbox, documentConverter],
   },
   {
     name: 'Development',

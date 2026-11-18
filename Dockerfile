@@ -7,6 +7,10 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN npm install -g pnpm && pnpm i --frozen-lockfile
 COPY . .
+# Để trống = frontend tự dùng cùng hostname + port 8000 lúc runtime (hợp deploy LAN/WG).
+# Muốn cố định API khác: docker build --build-arg VITE_CONVERTER_API_URL=https://converter.example.com
+ARG VITE_CONVERTER_API_URL=
+ENV VITE_CONVERTER_API_URL=$VITE_CONVERTER_API_URL
 RUN pnpm build
 
 # production stage

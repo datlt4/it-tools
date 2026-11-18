@@ -1,0 +1,27 @@
+# it-tools fork (datlt4) + converter backend.
+# Mini PC chỉ cần pull, không build:
+#   docker compose pull && docker compose up -d
+# Đổi image/tag qua .env: FRONTEND_IMAGE=..., CONVERTER_IMAGE=...
+# Muốn build local thay vì pull: docker compose build
+
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE:-hienanh/it-tools-frontend:latest}
+    build:
+      context: .
+      args:
+        VITE_CONVERTER_API_URL: ${VITE_CONVERTER_API_URL:-}
+    container_name: it-tools-fork
+    restart: unless-stopped
+    ports:
+      - '${FRONTEND_PORT:-8080}:80'
+    depends_on:
+      - converter
+
+  converter:
+    image: ${CONVERTER_IMAGE:-hienanh/it-tools-converter:latest}
+    build: ./server
+    container_name: it-tools-converter
+    restart: unless-stopped
+    ports:
+      - '${CONVERTER_PORT:-8000}:8000'

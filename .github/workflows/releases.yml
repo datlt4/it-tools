@@ -34,7 +34,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
+      - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -42,10 +42,23 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            corentinth/it-tools:latest
-            corentinth/it-tools:${{ env.RELEASE_VERSION }}
-            ghcr.io/corentinth/it-tools:latest
-            ghcr.io/corentinth/it-tools:${{ env.RELEASE_VERSION}}
+            hienanh/it-tools-frontend:latest
+            hienanh/it-tools-frontend:${{ env.RELEASE_VERSION }}
+            ghcr.io/datlt4/it-tools-frontend:latest
+            ghcr.io/datlt4/it-tools-frontend:${{ env.RELEASE_VERSION}}
+
+      - name: Build and push converter
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            hienanh/it-tools-converter:latest
+            hienanh/it-tools-converter:${{ env.RELEASE_VERSION }}
+            ghcr.io/datlt4/it-tools-converter:latest
+            ghcr.io/datlt4/it-tools-converter:${{ env.RELEASE_VERSION}}
 
   github-release:
     runs-on: ubuntu-latest
@@ -93,11 +106,13 @@ jobs:
             ## Docker images
 
             - Docker Hub
-              - `corentinth/it-tools:latest`
-              - `corentinth/it-tools:${{ env.RELEASE_VERSION }}`
+              - `hienanh/it-tools-frontend:latest`
+              - `hienanh/it-tools-frontend:${{ env.RELEASE_VERSION }}`
+              - `hienanh/it-tools-converter:latest`
+              - `hienanh/it-tools-converter:${{ env.RELEASE_VERSION }}`
             - GitHub Container Registry
-              - `ghcr.io/corentinth/it-tools:latest`
-              - `ghcr.io/corentinth/it-tools:${{ env.RELEASE_VERSION}}`
+              - `ghcr.io/datlt4/it-tools-frontend:latest`
+              - `ghcr.io/datlt4/it-tools-converter:latest`
 
             ## Changelog
 

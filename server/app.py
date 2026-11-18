@@ -1,0 +1,487 @@
+"""Converter backend for it-tools fork.
+
+- Office (docx/pptx/xlsx/odt/md/html/txt) -> PDF via LibreOffice headless
+- PDF -> text via pypdf
+- PDF -> images (zip) via PyMuPDF
+- Media (audio/video) -> convert/trim via ffmpeg binary (fallback for large files)
+- Jobs API: long-running ffmpeg work with progress / pause / resume / cancel
+"""
+import io
+import os
+import re
+import signal
+import subprocess
+import tempfile
+import threading
+import time
+import uuid
+import zipfile
+from pathlib import Path
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from pypdf import PdfReader, PdfWriter
+
+app = FastAPI(title='it-tools converter API', version='0.1.0')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_credentials=False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
+
+@app.get('/health')
+def health():
+    return {'status': 'ok'}
+
+
+def _safe_suffix(name: str) -> str:
+    suf = Path(name).suffix.lower()
+    return suf if len(suf) <= 8 else ''
+
+
+# ---------------------------------------------------------------- jobs ---
+
+JOB_ROOT = Path(tempfile.gettempdir()) / 'it-jobs'
+JOB_ROOT.mkdir(parents=True, exist_ok=True)
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+_TIME_RE = re.compile(r'time=(\d+):(\d+):([\d.]+)')
+
+MEDIA_MIME = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
+              'm4a': 'audio/mp4', 'flac': 'audio/flac', 'mp4': 'video/mp4',
+              'webm': 'video/webm', 'gif': 'image/gif'}
+
+
+def _ffprobe_duration(path: Path) -> float | None:
+    try:
+        r = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
+            capture_output=True, text=True, timeout=30)
+        d = float((r.stdout or '').strip())
+        return d if d > 0 else None
+    except Exception:
+        return None
+
+
+def _media_encode_args(fmt: str, crf: int = 23, resolution: str = 'original',
+                       fps: int = 15, gif_width: int = 480) -> list[str]:
+    if fmt == 'mp4':
+        args = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', str(crf),
+                '-c:a', 'aac', '-b:a', '128k']
+    elif fmt == 'webm':
+        args = ['-c:v', 'libvpx-vp9', '-b:v', '1M', '-c:a', 'libopus']
+    elif fmt == 'mp3':
+        return ['-vn', '-c:a', 'libmp3lame', '-b:a', '192k']
+    elif fmt == 'gif':
+        return ['-vf', f'fps={fps},scale={gif_width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse']
+    elif fmt == 'wav':
+        return ['-c:a', 'pcm_s16le']
+    elif fmt == 'ogg':
+        return ['-c:a', 'libvorbis', '-b:a', '192k']
+    elif fmt == 'm4a':
+        return ['-c:a', 'aac', '-b:a', '192k']
+    elif fmt == 'flac':
+        return ['-c:a', 'flac']
+    else:
+        raise HTTPException(400, f'Unsupported format: {fmt}')
+    if fmt in ('mp4', 'webm') and resolution != 'original':
+        args += ['-vf', f'scale=-2:{int(resolution)}']
+    return args
+
+
+def _job_public(job: dict) -> dict:
+    return {k: job[k] for k in
+            ('id', 'name', 'format', 'status', 'progress', 'created_at',
+             'error', 'out_filename', 'out_size') if k in job}
+
+
+def _run_media_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return
+        # giữ 'queued' cho tới khi ffmpeg spawn xong (tránh race pause/cancel sớm)
+    workdir: Path = job['workdir']
+    try:
+        total = 0.0
+        for src in job['inputs']:
+            d = _ffprobe_duration(workdir / src)
+            if d:
+                total += d
+        # trim rút ngắn thời lượng ước tính
+        if job.get('trim_duration'):
+            try:
+                total = min(total, float(job['trim_duration']))
+            except ValueError:
+                pass
+        job['duration'] = total or None
+
+        with _jobs_lock:
+            if job['status'] == 'canceled':
+                return
+        if len(job['inputs']) > 1 or job.get('merge'):
+            lst = workdir / 'concat.txt'
+            lst.write_text(''.join(f"file '{s}'\n" for s in job['inputs']))
+            cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', str(lst)]
+        else:
+            cmd = ['ffmpeg', '-y']
+            if job.get('trim_start'):
+                cmd += ['-ss', str(job['trim_start'])]
+            cmd += ['-i', str(workdir / job['inputs'][0])]
+        if job.get('trim_duration'):
+            cmd += ['-t', str(job['trim_duration'])]
+        out_name = f"output.{job['format']}"
+        cmd += _media_encode_args(job['format'], job.get('crf', 23),
+                                 job.get('resolution', 'original')) + [str(workdir / out_name)]
+        job['cmd'] = ' '.join(cmd)
+
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, bufsize=1,
+                                start_new_session=True)
+        job['proc'] = proc
+        with _jobs_lock:
+            if job['status'] == 'queued':
+                job['status'] = 'running'
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            m = _TIME_RE.search(line)
+            if m and job.get('duration'):
+                t = int(m.group(1)) * 3600 + int(m.group(2)) + float(m.group(3))
+                p = max(0.0, min(1.0, t / job['duration']))
+                job['progress'] = max(job.get('progress', 0.0), p)
+        proc.wait()
+        with _jobs_lock:
+            if job['status'] == 'canceled':
+                return
+            if proc.returncode == 0 and (workdir / out_name).exists():
+                job['status'] = 'done'
+                job['progress'] = 1.0
+                job['out_filename'] = f"{Path(job['name']).stem}.{job['format']}"
+                job['out_size'] = (workdir / out_name).stat().st_size
+            else:
+                job['status'] = 'error'
+                job['error'] = f'ffmpeg exit {proc.returncode}'
+    except Exception as e:
+        with _jobs_lock:
+            if job['status'] != 'canceled':
+                job['status'] = 'error'
+                job['error'] = str(e)[:500]
+    finally:
+        with _jobs_lock:
+            job.pop('proc', None)
+        _cleanup_jobs()
+
+
+def _cleanup_jobs():
+    # giữ tối đa 50 job, xóa job xong quá 24h (kèm file tạm)
+    with _jobs_lock:
+        ids = sorted(_jobs, key=lambda i: _jobs[i]['created_at'])
+        while len(ids) > 50:
+            _drop_job(ids.pop(0))
+        now = time.time()
+        for i in ids:
+            j = _jobs[i]
+            if j['status'] in ('done', 'error', 'canceled') and now - j['created_at'] > 86400:
+                _drop_job(i)
+
+
+def _drop_job(job_id: str):
+    job = _jobs.pop(job_id, None)
+    if not job:
+        return
+    proc = job.get('proc')
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        import shutil
+        shutil.rmtree(job['workdir'], ignore_errors=True)
+    except Exception:
+        pass
+
+
+@app.post('/jobs/media')
+async def create_media_job(
+    files: list[UploadFile] = File(...),
+    format: str = Form('mp4'),
+    crf: int = Form(23),
+    resolution: str = Form('original'),
+    trim_start: str = Form(''),
+    trim_duration: str = Form(''),
+    merge: bool = Form(False),
+):
+    """Tạo job ffmpeg chạy nền: convert 1 file hoặc merge nhiều file theo thứ tự."""
+    fmt = format.lower().strip()
+    if fmt not in MEDIA_MIME:
+        raise HTTPException(400, f'format must be one of {sorted(MEDIA_MIME)}')
+    if not files:
+        raise HTTPException(400, 'No files')
+    if len(files) > 20:
+        raise HTTPException(400, 'Too many files (max 20)')
+    job_id = uuid.uuid4().hex[:12]
+    workdir = JOB_ROOT / job_id
+    workdir.mkdir(parents=True, exist_ok=True)
+    names = []
+    for i, f in enumerate(files):
+        data = await f.read()
+        if len(data) > 1024 * 1024 * 1024:
+            raise HTTPException(413, f'{f.filename}: file too large (>1GB)')
+        safe = f'{i:02d}_{(f.filename or "input").replace("/", "_")}'
+        (workdir / safe).write_bytes(data)
+        names.append(safe)
+    job = {
+        'id': job_id, 'name': files[0].filename or 'media',
+        'format': fmt, 'status': 'queued', 'progress': 0.0,
+        'created_at': time.time(), 'error': None,
+        'out_filename': None, 'out_size': None,
+        'workdir': workdir, 'inputs': names, 'merge': merge or len(names) > 1,
+        'crf': max(0, min(51, crf)), 'resolution': resolution,
+        'trim_start': trim_start.strip(), 'trim_duration': trim_duration.strip(),
+    }
+    with _jobs_lock:
+        _jobs[job_id] = job
+    threading.Thread(target=_run_media_job, args=(job_id,), daemon=True).start()
+    return _job_public(job)
+
+
+@app.get('/jobs')
+def list_jobs():
+    with _jobs_lock:
+        return [_job_public(_jobs[i]) for i in
+                sorted(_jobs, key=lambda i: _jobs[i]['created_at'], reverse=True)]
+
+
+@app.get('/jobs/{job_id}')
+def get_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, 'Job not found')
+        return _job_public(job)
+
+
+def _signal_job(job_id: str, sig: int, to_status: str):
+    # đợi tối đa ~15s cho ffmpeg spawn (job vừa tạo còn đang ffprobe)
+    proc = None
+    for _ in range(150):
+        with _jobs_lock:
+            job = _jobs.get(job_id)
+            if not job:
+                raise HTTPException(404, 'Job not found')
+            if job['status'] not in ('running', 'paused', 'queued'):
+                raise HTTPException(409, f'Job is {job["status"]}, cannot change state')
+            proc = job.get('proc')
+            if proc is not None and proc.poll() is None:
+                break
+            proc = None
+        time.sleep(0.1)
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, 'Job not found')
+        proc = job.get('proc')
+        if job['status'] not in ('running', 'paused') or not proc or proc.poll() is not None:
+            raise HTTPException(409, f'Job is {job["status"]}, cannot change state')
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except Exception as e:
+            raise HTTPException(500, f'Signal failed: {e}')
+        job['status'] = to_status
+        return _job_public(job)
+
+
+@app.post('/jobs/{job_id}/pause')
+def pause_job(job_id: str):
+    return _signal_job(job_id, signal.SIGSTOP, 'paused')
+
+
+@app.post('/jobs/{job_id}/resume')
+def resume_job(job_id: str):
+    return _signal_job(job_id, signal.SIGCONT, 'running')
+
+
+@app.post('/jobs/{job_id}/cancel')
+def cancel_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, 'Job not found')
+        proc = job.get('proc')
+        if proc and proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
+        job['status'] = 'canceled'
+        return _job_public(job)
+
+
+@app.delete('/jobs/{job_id}')
+def delete_job(job_id: str):
+    with _jobs_lock:
+        if job_id not in _jobs:
+            raise HTTPException(404, 'Job not found')
+    _drop_job(job_id)
+    return {'deleted': job_id}
+
+
+@app.get('/jobs/{job_id}/download')
+def download_job(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, 'Job not found')
+        if job['status'] != 'done':
+            raise HTTPException(409, f'Job is {job["status"]}')
+        path = job['workdir'] / f"output.{job['format']}"
+    return FileResponse(path, media_type=MEDIA_MIME[job['format']],
+                        filename=job.get('out_filename') or f'output.{job["format"]}')
+
+
+
+@app.post('/convert/office-to-pdf')
+async def office_to_pdf(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(400, 'No files')
+    outs: list[tuple[str, bytes]] = []
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for f in files:
+            data = await f.read()
+            if len(data) > 200 * 1024 * 1024:
+                raise HTTPException(413, f'{f.filename}: file too large (>200MB)')
+            src = tmp / f.filename.replace('/', '_')
+            src.write_bytes(data)
+            # LibreOffice converts in-place to same dir
+            cmd = [
+                'libreoffice', '--headless', '--convert-to', 'pdf',
+                '--outdir', str(tmp), str(src),
+            ]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            except FileNotFoundError:
+                raise HTTPException(500, 'LibreOffice not installed in backend image')
+            except subprocess.TimeoutExpired:
+                raise HTTPException(500, f'{f.filename}: convert timeout')
+            if r.returncode != 0:
+                raise HTTPException(500, f'{f.filename}: LibreOffice failed: {(r.stderr or r.stdout)[:1000]}')
+            pdf_path = tmp / (src.stem + '.pdf')
+            if not pdf_path.exists():
+                # try any pdf produced
+                cands = list(tmp.glob('*.pdf'))
+                if not cands:
+                    raise HTTPException(500, f'{f.filename}: no PDF produced')
+                pdf_path = cands[0]
+            outs.append((pdf_path.stem + '.pdf', pdf_path.read_bytes()))
+            # cleanup source to avoid re-pickup
+            try:
+                src.unlink(missing_ok=True)
+                pdf_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    if len(outs) == 1:
+        name, blob = outs[0]
+        return Response(content=blob, media_type='application/pdf',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, blob in outs:
+            z.writestr(name, blob)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type='application/zip',
+                             headers={'Content-Disposition': 'attachment; filename="converted.zip"'})
+
+
+@app.post('/convert/pdf-to-text')
+async def pdf_to_text(files: list[UploadFile] = File(...)):
+    if len(files) != 1:
+        raise HTTPException(400, 'Send exactly 1 PDF')
+    data = await files[0].read()
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        parts = []
+        for i, page in enumerate(reader.pages):
+            try:
+                parts.append(f'--- page {i + 1} ---\n' + (page.extract_text() or ''))
+            except Exception as e:
+                parts.append(f'--- page {i + 1} (error: {e}) ---\n')
+        text = '\n'.join(parts)
+    except Exception as e:
+        raise HTTPException(400, f'Invalid PDF: {e}')
+    return Response(content=text.encode('utf-8'), media_type='text/plain; charset=utf-8')
+
+
+@app.post('/convert/pdf-to-images')
+async def pdf_to_images(files: list[UploadFile] = File(...), dpi: int = Form(150)):
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise HTTPException(500, 'PyMuPDF not installed')
+    if len(files) != 1:
+        raise HTTPException(400, 'Send exactly 1 PDF')
+    dpi = max(72, min(dpi, 300))
+    data = await files[0].read()
+    try:
+        doc = fitz.open(stream=data, filetype='pdf')
+    except Exception as e:
+        raise HTTPException(400, f'Invalid PDF: {e}')
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(dpi=dpi)
+            z.writestr(f'page-{i + 1:03d}.png', pix.tobytes('png'))
+    buf.seek(0)
+    return StreamingResponse(buf, media_type='application/zip',
+                             headers={'Content-Disposition': 'attachment; filename="pages.zip"'})
+
+
+@app.post('/convert/media')
+async def media_convert(
+    files: list[UploadFile] = File(...),
+    format: str = Form('mp3'),
+    extra_args: str = Form(''),
+):
+    """Fallback server-side ffmpeg for large files. format: mp3|wav|ogg|mp4|webm|gif"""
+    allowed = {'mp3', 'wav', 'ogg', 'm4a', 'flac', 'mp4', 'webm', 'gif'}
+    fmt = format.lower().strip()
+    if fmt not in allowed:
+        raise HTTPException(400, f'format must be one of {sorted(allowed)}')
+    if len(files) != 1:
+        raise HTTPException(400, 'Send exactly 1 media file')
+    data = await files[0].read()
+    if len(data) > 1024 * 1024 * 1024:
+        raise HTTPException(413, 'File too large (>1GB)')
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / f'input{_safe_suffix(files[0].filename or "")}'
+        src.write_bytes(data)
+        out = tmp / f'output.{fmt}'
+        cmd = ['ffmpeg', '-y', '-i', str(src)]
+        if extra_args.strip():
+            cmd += extra_args.strip().split()
+        if fmt == 'mp3':
+            cmd += ['-codec:a', 'libmp3lame', '-b:a', '192k']
+        elif fmt == 'gif':
+            cmd += ['-vf', 'fps=15,scale=480:-1:flags=lanczos']
+        cmd += [str(out)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except FileNotFoundError:
+            raise HTTPException(500, 'ffmpeg not installed')
+        if r.returncode != 0 or not out.exists():
+            raise HTTPException(500, f'ffmpeg failed: {(r.stderr or "")[-2000:]}')
+        blob = out.read_bytes()
+    mime = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
+            'm4a': 'audio/mp4', 'flac': 'audio/flac', 'mp4': 'video/mp4',
+            'webm': 'video/webm', 'gif': 'image/gif'}[fmt]
+    stem = Path(files[0].filename or 'output').stem
+    return Response(content=blob, media_type=mime,
+                    headers={'Content-Disposition': f'attachment; filename="{stem}.{fmt}"'})
