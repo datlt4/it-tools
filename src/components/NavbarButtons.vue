@@ -50,4 +50,13 @@ const { isDarkTheme } = toRefs(styleStore);
     margin-right: 5px;
   }
 }
+
+// n-badge bọc nút Job: giữ cùng hàng, căn giữa như các nút circle khác
+:deep(.n-badge) {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-right: 5px;
+  line-height: 1;
+}
 </style>
