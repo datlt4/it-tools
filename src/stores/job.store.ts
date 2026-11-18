@@ -27,17 +27,24 @@ export const useJobStore = defineStore('converter-jobs', {
     track(id: string, name?: string) {
       if (!this.jobs.some(j => j.id === id)) {
         this.jobs.unshift({
-          id, name: name ?? id, format: '', status: 'queued',
-          progress: 0, created_at: Date.now() / 1000,
-          error: null, out_filename: null, out_size: null,
+          id,
+          name: name ?? id,
+          format: '',
+          status: 'queued',
+          progress: 0,
+          created_at: Date.now() / 1000,
+          error: null,
+          out_filename: null,
+          out_size: null,
         });
       }
       this.ensurePolling();
       void this.refresh();
     },
     ensurePolling() {
-      if (pollTimer)
+      if (pollTimer) {
         return;
+      }
       pollTimer = setInterval(() => {
         void this.refresh().then(() => {
           if (!this.hasUnfinished && pollTimer) {
@@ -52,8 +59,10 @@ export const useJobStore = defineStore('converter-jobs', {
         const remote = await listJobs();
         const known = new Map(this.jobs.map(j => [j.id, j]));
         for (const r of remote) {
-          if (!r.name && known.get(r.id)?.name)
-            r.name = known.get(r.id)!.name;
+          const prev = known.get(r.id);
+          if (!r.name && prev?.name) {
+            r.name = prev.name;
+          }
         }
         this.jobs = remote;
         this.lastError = '';
@@ -83,13 +92,17 @@ export const useJobStore = defineStore('converter-jobs', {
     },
     patch(j: ConverterJob) {
       const i = this.jobs.findIndex(x => x.id === j.id);
-      if (i !== -1)
+      if (i !== -1) {
         this.jobs[i] = { ...this.jobs[i], ...j };
-      else this.jobs.unshift(j);
+      }
+      else {
+        this.jobs.unshift(j);
+      }
     },
     download(j: ConverterJob) {
-      if (j.status !== 'done')
+      if (j.status !== 'done') {
         return;
+      }
       downloadUrl(jobDownloadUrl(j.id), j.out_filename || `job-${j.id}`);
     },
   },

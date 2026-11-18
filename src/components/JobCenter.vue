@@ -43,7 +43,7 @@ function pct(j: { progress: number }) {
         </c-alert>
       </div>
 
-      <div v-if="!jobStore.jobs.length" op-60 text-sm>
+      <div v-if="!jobStore.jobs.length" text-sm op-60>
         Chưa có job nào. Vào Video converter → chọn "Backend job" để gửi việc nặng lên server, tiến độ hiện ở đây.
       </div>
 
@@ -57,15 +57,15 @@ function pct(j: { progress: number }) {
               {{ statusLabel[j.status] ?? j.status }}
             </n-tag>
           </div>
-          <div text-xs op-60 mt-1>
+          <div mt-1 text-xs op-60>
             {{ j.format.toUpperCase() }} • {{ pct(j) }}%
             <span v-if="j.out_size"> • {{ formatBytes(j.out_size) }}</span>
           </div>
           <n-progress type="line" :percentage="pct(j)" :status="j.status === 'error' ? 'error' : j.status === 'done' ? 'success' : 'default'" mt-2 />
-          <div v-if="j.error" text-red-500 text-xs mt-1>
+          <div v-if="j.error" mt-1 text-xs text-red-500>
             {{ j.error }}
           </div>
-          <div flex flex-wrap gap-2 mt-2>
+          <div mt-2 flex flex-wrap gap-2>
             <c-button v-if="j.status === 'running'" size="small" @click="jobStore.pause(j.id)">
               Tạm dừng
             </c-button>

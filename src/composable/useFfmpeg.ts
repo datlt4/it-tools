@@ -11,11 +11,13 @@ export function isFfmpegSupported() {
 }
 
 async function loadFfmpeg(progressCb?: (ratio: number) => void) {
-  if (ffmpegInstance)
+  if (ffmpegInstance) {
     return ffmpegInstance;
+  }
 
-  if (loadingPromise)
+  if (loadingPromise) {
     return loadingPromise;
+  }
 
   loadingPromise = (async () => {
     const [{ FFmpeg }, { toBlobURL, fetchFile: _fetchFile }] = await Promise.all([

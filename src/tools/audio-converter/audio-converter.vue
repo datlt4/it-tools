@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useFfmpeg, readFfmpegFile } from '@/composable/useFfmpeg';
+import { readFfmpegFile, useFfmpeg } from '@/composable/useFfmpeg';
 import { downloadBlob, formatTime, getBaseName, parseTimeToSeconds, uid } from '@/utils/media';
 import { formatBytes } from '@/utils/convert';
 
@@ -70,8 +70,9 @@ function onSingle(f: File) {
 function clearAll() {
   for (const it of items.value) {
     URL.revokeObjectURL(it.url);
-    if (it.outUrl)
+    if (it.outUrl) {
       URL.revokeObjectURL(it.outUrl);
+    }
   }
   items.value = [];
 }
@@ -81,12 +82,15 @@ function buildArgs(input: string, output: string, fmt: AudioFmt): string[] {
   const ss = parseTimeToSeconds(trimStart.value);
   const to = parseTimeToSeconds(trimEnd.value);
   if (trimEnabled.value && (ss !== null || to !== null)) {
-    if (ss !== null)
+    if (ss !== null) {
       args.push('-ss', String(ss));
-    if (to !== null && ss !== null && to > ss)
+    }
+    if (to !== null && ss !== null && to > ss) {
       args.push('-t', String(to - ss));
-    else if (to !== null)
+    }
+    else if (to !== null) {
       args.push('-to', String(to));
+    }
   }
   if (fmt === 'mp3') {
     args.push('-codec:a', 'libmp3lame', '-b:a', bitrate.value);
@@ -108,8 +112,9 @@ function buildArgs(input: string, output: string, fmt: AudioFmt): string[] {
 }
 
 async function convertAll() {
-  if (!items.value.length)
+  if (!items.value.length) {
     return;
+  }
   isWorking.value = true;
   log.value = '';
   try {
@@ -118,8 +123,9 @@ async function convertAll() {
       await mergeAll(ffmpeg);
     }
     else {
-      for (const it of items.value)
+      for (const it of items.value) {
         await convertOne(ffmpeg, it);
+      }
     }
   }
   catch (e: any) {
@@ -142,8 +148,9 @@ async function convertOne(ffmpeg: any, it: AudioItem) {
     const data = await ffmpeg.readFile(outName) as Uint8Array;
     const mime = targetFormat.value === 'mp3' ? 'audio/mpeg' : targetFormat.value === 'wav' ? 'audio/wav' : targetFormat.value === 'ogg' ? 'audio/ogg' : targetFormat.value === 'm4a' ? 'audio/mp4' : 'audio/flac';
     const blob = new Blob([data.buffer as ArrayBuffer], { type: mime });
-    if (it.outUrl)
+    if (it.outUrl) {
       URL.revokeObjectURL(it.outUrl);
+    }
     it.outUrl = URL.createObjectURL(blob);
     it.outBlob = blob;
     it.outSize = blob.size;
@@ -169,18 +176,19 @@ async function mergeAll(ffmpeg: any) {
   await ffmpeg.writeFile(listName, new TextEncoder().encode(listContent));
   const outName = `merged.${targetFormat.value}`;
   const baseArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', listName];
-  if (targetFormat.value === 'mp3')
+  if (targetFormat.value === 'mp3') {
     baseArgs.push('-codec:a', 'libmp3lame', '-b:a', bitrate.value);
-  else
-    baseArgs.push('-c', 'copy');
+  }
+  else { baseArgs.push('-c', 'copy'); }
   baseArgs.push(outName);
   log.value += `$ ffmpeg ${baseArgs.join(' ')}\n`;
   await ffmpeg.exec(baseArgs);
   const data = await ffmpeg.readFile(outName) as Uint8Array;
   const blob = new Blob([data.buffer as ArrayBuffer], { type: 'audio/mpeg' });
   const first = items.value[0];
-  if (first.outUrl)
+  if (first.outUrl) {
     URL.revokeObjectURL(first.outUrl);
+  }
   first.outUrl = URL.createObjectURL(blob);
   first.outBlob = blob;
   first.outSize = blob.size;
@@ -194,8 +202,9 @@ async function mergeAll(ffmpeg: any) {
 }
 
 function downloadOne(it: AudioItem) {
-  if (!it.outBlob)
+  if (!it.outBlob) {
     return;
+  }
   const name = mergeMode.value ? `merged.${targetFormat.value}` : `${getBaseName(it.file.name)}.${targetFormat.value}`;
   downloadBlob(it.outBlob, name);
 }
@@ -217,7 +226,7 @@ function downloadOne(it: AudioItem) {
     </c-card>
 
     <c-card title="2. Tùy chọn">
-      <div grid grid-cols-1 md:grid-cols-3 gap-4>
+      <div grid grid-cols-1 gap-4 md:grid-cols-3>
         <c-select v-model:value="targetFormat" label="Định dạng" :options="formatOptions" />
         <c-select v-model:value="bitrate" label="Bitrate" :options="bitrateOptions" />
         <div flex items-end pb-1>
@@ -226,7 +235,7 @@ function downloadOne(it: AudioItem) {
           </n-checkbox>
         </div>
       </div>
-      <div v-if="trimEnabled" grid grid-cols-1 md:grid-cols-2 gap-4 mt-3>
+      <div v-if="trimEnabled" grid grid-cols-1 mt-3 gap-4 md:grid-cols-2>
         <c-input-text v-model:value="trimStart" label="Bắt đầu (giây hoặc mm:ss, vd 0:30)" placeholder="0" />
         <c-input-text v-model:value="trimEnd" label="Kết thúc (để trống = hết file)" placeholder="1:00" />
       </div>
@@ -235,12 +244,12 @@ function downloadOne(it: AudioItem) {
           Nối (merge) tất cả thành 1 file theo thứ tự danh sách
         </n-checkbox>
       </div>
-      <div flex flex-wrap gap-2 mt-4>
+      <div mt-4 flex flex-wrap gap-2>
         <c-button type="primary" :disabled="!items.length || isWorking || isLoading" @click="convertAll">
           {{ isLoading ? 'Đang tải ffmpeg (~30MB lần đầu)...' : isWorking ? `Đang xử lý ${(progress * 100).toFixed(0)}%...` : `Convert ${items.length} file → ${targetFormat.toUpperCase()}` }}
         </c-button>
       </div>
-      <div v-if="loadError" mt-2 text-red-500 text-sm>
+      <div v-if="loadError" mt-2 text-sm text-red-500>
         Lỗi tải ffmpeg: {{ loadError }} — thử reload hoặc kiểm tra mạng/CDN jsdelivr.
       </div>
       <c-alert mt-3 type="info">
@@ -259,24 +268,24 @@ function downloadOne(it: AudioItem) {
               {{ it.status }}
             </div>
           </div>
-          <audio :src="it.url" controls w-full mt-2 />
+          <audio :src="it.url" controls mt-2 w-full />
           <div v-if="it.outUrl" mt-2>
-            <div text-sm mb-1>
+            <div mb-1 text-sm>
               Kết quả: {{ formatBytes(it.outSize ?? 0) }}
             </div>
             <audio :src="it.outUrl" controls w-full />
-            <div flex gap-2 mt-2>
+            <div mt-2 flex gap-2>
               <c-button size="small" type="primary" @click="downloadOne(it)">
                 Tải xuống
               </c-button>
             </div>
           </div>
-          <div v-if="it.error" text-red-500 text-sm mt-1>
+          <div v-if="it.error" mt-1 text-sm text-red-500>
             {{ it.error }}
           </div>
         </div>
       </div>
-      <pre v-if="log" mt-3 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto>{{ log }}</pre>
+      <pre v-if="log" mt-3 overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-gray-800>{{ log }}</pre>
     </c-card>
   </div>
 </template>

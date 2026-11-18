@@ -31,8 +31,9 @@ const rotateOptions = [
 
 function onPdfFiles(files: File[]) {
   for (const f of files) {
-    if (!f.name.toLowerCase().endsWith('.pdf'))
+    if (!f.name.toLowerCase().endsWith('.pdf')) {
       continue;
+    }
     pdfs.value.push({ id: uid(), file: f });
   }
 }
@@ -44,16 +45,18 @@ function clearPdfs() {
   clearResult();
 }
 function clearResult() {
-  if (resultUrl.value)
+  if (resultUrl.value) {
     URL.revokeObjectURL(resultUrl.value);
+  }
   resultUrl.value = null;
   resultBlob = null;
   resultSize.value = null;
 }
 function move(idx: number, dir: -1 | 1) {
   const j = idx + dir;
-  if (j < 0 || j >= pdfs.value.length)
+  if (j < 0 || j >= pdfs.value.length) {
     return;
+  }
   const arr = [...pdfs.value];
   const [x] = arr.splice(idx, 1);
   arr.splice(j, 0, x);
@@ -67,17 +70,20 @@ function parseRanges(input: string, max: number): number[] {
     if (m) {
       let a = Number(m[1]);
       let b = Number(m[2]);
-      if (a > b)
+      if (a > b) {
         [a, b] = [b, a];
+      }
       for (let i = a; i <= b; i++) {
-        if (i >= 1 && i <= max)
+        if (i >= 1 && i <= max) {
           out.add(i);
+        }
       }
     }
     else {
       const n = Number(part);
-      if (Number.isInteger(n) && n >= 1 && n <= max)
+      if (Number.isInteger(n) && n >= 1 && n <= max) {
         out.add(n);
+      }
     }
   }
   return [...out].sort((a, b) => a - b);
@@ -109,7 +115,9 @@ async function runMerge() {
       const buf = await p.file.arrayBuffer();
       const doc = await PDFDocument.load(buf, { ignoreEncryption: true });
       const pages = await merged.copyPages(doc, doc.getPageIndices());
-      for (const pg of pages) merged.addPage(pg);
+      for (const pg of pages) {
+        merged.addPage(pg);
+      }
     }
     const bytes = await merged.save({ useObjectStreams: true });
     setResult(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' }), 'merged.pdf');
@@ -135,11 +143,14 @@ async function runSplit() {
     const src = await PDFDocument.load(buf, { ignoreEncryption: true });
     const total = src.getPageCount();
     const pages = parseRanges(splitRange.value, total);
-    if (!pages.length)
+    if (!pages.length) {
       throw new Error(`Range không hợp lệ. File có ${total} trang. VD: 1-3,5`);
+    }
     const out = await PDFDocument.create();
     const copied = await out.copyPages(src, pages.map(n => n - 1));
-    for (const pg of copied) out.addPage(pg);
+    for (const pg of copied) {
+      out.addPage(pg);
+    }
     const bytes = await out.save({ useObjectStreams: true });
     setResult(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' }), `${getBaseName(pdfs.value[0].file.name)}-p${pages[0]}-p${pages[pages.length - 1]}.pdf`);
   }
@@ -162,8 +173,9 @@ async function runRotate() {
     const { PDFDocument, degrees } = await getPdfLib();
     const buf = await pdfs.value[0].file.arrayBuffer();
     const doc = await PDFDocument.load(buf, { ignoreEncryption: true });
-    for (const pg of doc.getPages())
+    for (const pg of doc.getPages()) {
       pg.setRotation(degrees((pg.getRotation().angle + rotateDeg.value) % 360));
+    }
     const bytes = await doc.save({ useObjectStreams: true });
     setResult(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' }), `${getBaseName(pdfs.value[0].file.name)}-rotated.pdf`);
   }
@@ -208,9 +220,12 @@ async function runImg2Pdf() {
         canvas.width = bmp.width;
         canvas.height = bmp.height;
         canvas.getContext('2d')!.drawImage(bmp, 0, 0);
-        const jpgBlob: Blob | null = await new Promise(r => canvas.toBlob(b => r(b), 'image/jpeg', 0.85));
-        if (!jpgBlob)
+        const jpgBlob: Blob | null = await new Promise((resolve) => {
+          canvas.toBlob(b => resolve(b), 'image/jpeg', 0.85);
+        });
+        if (!jpgBlob) {
           throw new Error('Convert ảnh thất bại');
+        }
         img = await doc.embedJpg(new Uint8Array(await jpgBlob.arrayBuffer()));
       }
       const page = doc.addPage([img.width, img.height]);
@@ -228,18 +243,22 @@ async function runImg2Pdf() {
 }
 
 async function run() {
-  if (activeTab.value === 'merge')
+  if (activeTab.value === 'merge') {
     await runMerge();
-  else if (activeTab.value === 'split')
+  }
+  else if (activeTab.value === 'split') {
     await runSplit();
-  else if (activeTab.value === 'rotate')
+  }
+  else if (activeTab.value === 'rotate') {
     await runRotate();
-  else await runImg2Pdf();
+  }
+  else { await runImg2Pdf(); }
 }
 
 function downloadResult() {
-  if (resultBlob)
+  if (resultBlob) {
     downloadBlob(resultBlob, resultName.value);
+  }
 }
 </script>
 
@@ -250,11 +269,11 @@ function downloadResult() {
       <div v-if="activeTab !== 'img2pdf'" mt-4>
         <c-file-upload multiple accept=".pdf,application/pdf" title="Kéo thả PDF vào đây" @files-upload="onPdfFiles" @file-upload="onSingle" />
         <div v-if="pdfs.length" mt-3 flex flex-col gap-2>
-          <div v-for="(p, i) in pdfs" :key="p.id" flex items-center justify-between border rounded px-3 py-2 gap-2>
+          <div v-for="(p, i) in pdfs" :key="p.id" flex items-center justify-between gap-2 border rounded px-3 py-2>
             <div truncate>
               {{ i + 1 }}. {{ p.file.name }} • {{ formatBytes(p.file.size) }}
             </div>
-            <div flex gap-1 shrink-0>
+            <div flex shrink-0 gap-1>
               <c-button size="small" :disabled="i === 0" @click="move(i, -1)">
                 ↑
               </c-button>
@@ -281,12 +300,12 @@ function downloadResult() {
         </div>
       </div>
 
-      <div mt-4 grid grid-cols-1 md:grid-cols-2 gap-4>
+      <div grid grid-cols-1 mt-4 gap-4 md:grid-cols-2>
         <c-input-text v-if="activeTab === 'split'" v-model:value="splitRange" label="Trang cần trích (vd 1-3,5,8-10)" placeholder="1-3" />
         <c-select v-if="activeTab === 'rotate'" v-model:value="rotateDeg" label="Góc xoay" :options="rotateOptions" />
       </div>
 
-      <div flex gap-2 mt-4>
+      <div mt-4 flex gap-2>
         <c-button type="primary" :disabled="isWorking" @click="run">
           {{ isWorking ? 'Đang xử lý...' : activeTab === 'merge' ? 'Gộp PDF' : activeTab === 'split' ? 'Tách PDF' : activeTab === 'rotate' ? 'Xoay PDF' : 'Tạo PDF từ ảnh' }}
         </c-button>
@@ -294,13 +313,13 @@ function downloadResult() {
           Tải {{ resultName }} {{ resultSize ? `(${formatBytes(resultSize)})` : '' }}
         </c-button>
       </div>
-      <div v-if="error" mt-2 text-red-500 text-sm>
+      <div v-if="error" mt-2 text-sm text-red-500>
         {{ error }}
       </div>
       <c-alert mt-3 type="info">
         Gộp/tách/xoay/ảnh→PDF chạy local bằng pdf-lib, không giới hạn số trang ở mức vừa phải. PDF scan nặng, mã hóa, hoặc cần OCR/nén mạnh → dùng backend.
       </c-alert>
-      <iframe v-if="resultUrl" :src="resultUrl" w-full h-500px mt-3 border rounded />
+      <iframe v-if="resultUrl" :src="resultUrl" mt-3 h-500px w-full border rounded />
     </c-card>
   </div>
 </template>

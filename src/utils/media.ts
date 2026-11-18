@@ -31,8 +31,9 @@ export function getExtension(filename: string) {
 }
 
 export function formatTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0)
+  if (!Number.isFinite(seconds) || seconds < 0) {
     return '0:00';
+  }
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
@@ -40,16 +41,20 @@ export function formatTime(seconds: number) {
 
 export function parseTimeToSeconds(input: string): number | null {
   const v = input.trim().replace(',', '.');
-  if (v === '')
+  if (v === '') {
     return null;
-  if (/^\d+(\.\d+)?$/.test(v))
+  }
+  if (/^\d+(\.\d+)?$/.test(v)) {
     return Number.parseFloat(v);
+  }
   const parts = v.split(':').map(Number);
-  if (parts.some(n => Number.isNaN(n)))
+  if (parts.some(n => Number.isNaN(n))) {
     return null;
+  }
   let total = 0;
-  for (const p of parts)
+  for (const p of parts) {
     total = total * 60 + p;
+  }
   return total;
 }
 

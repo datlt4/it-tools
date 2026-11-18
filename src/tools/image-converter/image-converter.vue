@@ -41,8 +41,9 @@ const rotationOptions = [
 
 function onFiles(files: File[]) {
   for (const file of files) {
-    if (!file.type.startsWith('image/'))
+    if (!file.type.startsWith('image/')) {
       continue;
+    }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -68,8 +69,9 @@ function onSingle(file: File) {
 function clearAll() {
   for (const it of items.value) {
     URL.revokeObjectURL(it.src);
-    if (it.outUrl)
+    if (it.outUrl) {
       URL.revokeObjectURL(it.outUrl);
+    }
   }
   items.value = [];
 }
@@ -79,8 +81,9 @@ function removeItem(id: string) {
   if (idx !== -1) {
     const [rm] = items.value.splice(idx, 1);
     URL.revokeObjectURL(rm.src);
-    if (rm.outUrl)
+    if (rm.outUrl) {
       URL.revokeObjectURL(rm.outUrl);
+    }
   }
 }
 
@@ -128,11 +131,13 @@ async function convertOne(item: Item): Promise<void> {
     const blob: Blob | null = await new Promise(resolve =>
       canvas.toBlob(b => resolve(b), mime, targetFormat.value === 'png' ? undefined : quality.value),
     );
-    if (!blob)
+    if (!blob) {
       throw new Error('Canvas export failed');
+    }
 
-    if (item.outUrl)
+    if (item.outUrl) {
       URL.revokeObjectURL(item.outUrl);
+    }
     item.outUrl = URL.createObjectURL(blob);
     item.outBlob = blob;
     item.outSize = blob.size;
@@ -145,25 +150,29 @@ async function convertOne(item: Item): Promise<void> {
 }
 
 async function convertAll() {
-  if (!items.value.length)
+  if (!items.value.length) {
     return;
+  }
   isConverting.value = true;
-  for (const it of items.value)
+  for (const it of items.value) {
     await convertOne(it);
+  }
   isConverting.value = false;
 }
 
 function downloadOne(item: Item) {
-  if (!item.outBlob)
+  if (!item.outBlob) {
     return;
+  }
   const ext = targetFormat.value === 'jpeg' ? 'jpg' : targetFormat.value;
   downloadBlob(item.outBlob, `${getBaseName(item.file.name)}.${ext}`);
 }
 
 function downloadAll() {
   for (const it of items.value) {
-    if (it.outBlob)
+    if (it.outBlob) {
       downloadOne(it);
+    }
   }
 }
 
@@ -182,7 +191,7 @@ const totalSaved = computed(() => {
         <c-button v-if="items.length" size="small" @click="clearAll">
           Xóa tất cả ({{ items.length }})
         </c-button>
-        <span v-if="items.length" op-70 text-sm>
+        <span v-if="items.length" text-sm op-70>
           {{ formatBytes(totalSaved.orig) }} → {{ totalSaved.out ? formatBytes(totalSaved.out) : '...' }}
           <span v-if="totalSaved.out"> ({{ totalSaved.ratio > 0 ? `giảm ${totalSaved.ratio}%` : 'tăng size' }})</span>
         </span>
@@ -190,21 +199,21 @@ const totalSaved = computed(() => {
     </c-card>
 
     <c-card title="2. Tùy chọn convert">
-      <div grid grid-cols-1 md:grid-cols-2 gap-4>
+      <div grid grid-cols-1 gap-4 md:grid-cols-2>
         <c-select v-model:value="targetFormat" label="Định dạng đầu ra" :options="formatOptions" />
         <c-select v-model:value="rotation" label="Xoay" :options="rotationOptions" />
       </div>
-      <div grid grid-cols-1 md:grid-cols-2 gap-4 mt-4>
+      <div grid grid-cols-1 mt-4 gap-4 md:grid-cols-2>
         <div>
-          <label text-sm mb-1 block>Chất lượng (JPEG/WEBP): {{ Math.round(quality * 100) }}%</label>
+          <label mb-1 block text-sm>Chất lượng (JPEG/WEBP): {{ Math.round(quality * 100) }}%</label>
           <n-slider v-model:value="quality" :min="0.1" :max="1" :step="0.01" />
         </div>
         <div>
-          <label text-sm mb-1 block>Cạnh dài tối đa (px, 0 = giữ gốc): {{ maxSize }}</label>
+          <label mb-1 block text-sm>Cạnh dài tối đa (px, 0 = giữ gốc): {{ maxSize }}</label>
           <n-slider v-model:value="maxSize" :min="0" :max="4096" :step="16" />
         </div>
       </div>
-      <div flex flex-wrap gap-3 mt-4>
+      <div mt-4 flex flex-wrap gap-3>
         <c-button type="primary" :disabled="!items.length || isConverting" @click="convertAll">
           {{ isConverting ? 'Đang convert...' : `Convert ${items.length} ảnh → ${targetFormat.toUpperCase()}` }}
         </c-button>
@@ -218,8 +227,8 @@ const totalSaved = computed(() => {
     </c-card>
 
     <c-card v-if="items.length" title="3. Kết quả">
-      <div grid grid-cols-1 md:grid-cols-2 gap-3>
-        <div v-for="it in items" :key="it.id" border rounded p-3 flex flex-col gap-2>
+      <div grid grid-cols-1 gap-3 md:grid-cols-2>
+        <div v-for="it in items" :key="it.id" flex flex-col gap-2 border rounded p-3>
           <div flex items-center justify-between gap-2>
             <div truncate font-medium>
               {{ it.file.name }}
@@ -233,9 +242,9 @@ const totalSaved = computed(() => {
             <span v-if="it.outSize"> → {{ formatBytes(it.outSize) }}</span>
           </div>
           <div grid grid-cols-2 gap-2>
-            <img :src="it.src" alt="original" rounded max-h-160px w-full object-contain bg-gray-100 />
-            <img v-if="it.outUrl" :src="it.outUrl" alt="converted" rounded max-h-160px w-full object-contain bg-gray-100 />
-            <div v-else flex items-center justify-center max-h-160px min-h-100px bg-gray-50 rounded text-sm op-60>
+            <img :src="it.src" alt="original" max-h-160px w-full rounded bg-gray-100 object-contain>
+            <img v-if="it.outUrl" :src="it.outUrl" alt="converted" max-h-160px w-full rounded bg-gray-100 object-contain>
+            <div v-else max-h-160px min-h-100px flex items-center justify-center rounded bg-gray-50 text-sm op-60>
               {{ it.status === 'converting' ? 'Đang convert...' : it.status === 'error' ? `Lỗi: ${it.error}` : 'Chưa convert' }}
             </div>
           </div>

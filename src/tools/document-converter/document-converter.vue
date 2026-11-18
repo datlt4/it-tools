@@ -40,8 +40,9 @@ function onPdf(f: File) {
 }
 
 function clearResult() {
-  if (resultUrl.value)
+  if (resultUrl.value) {
     URL.revokeObjectURL(resultUrl.value);
+  }
   resultUrl.value = null;
   resultBlob = null;
   resultSize.value = null;
@@ -116,8 +117,9 @@ async function officeToPdf() {
     resultBlob = blob;
     resultUrl.value = URL.createObjectURL(blob);
     resultName.value = officeFiles.value.length === 1 ? `${getBaseName(officeFiles.value[0].name)}.pdf` : 'converted.pdf';
-    if (blob.type === 'application/zip' && officeFiles.value.length > 1)
+    if (blob.type === 'application/zip' && officeFiles.value.length > 1) {
       resultName.value = 'converted.zip';
+    }
     resultSize.value = blob.size;
   }
   catch (e: any) {
@@ -151,8 +153,9 @@ async function pdfToOther() {
       resultName.value = `${getBaseName((pdfFile.value as File).name)}-images.zip`;
       resultSize.value = blob.size;
     }
-    if (resultBlob)
+    if (resultBlob) {
       resultUrl.value = URL.createObjectURL(resultBlob);
+    }
   }
   catch (e: any) {
     error.value = `${e?.message ?? String(e)} — kiểm tra backend.`;
@@ -163,8 +166,9 @@ async function pdfToOther() {
 }
 
 function downloadResult() {
-  if (resultBlob)
+  if (resultBlob) {
     downloadBlob(resultBlob, resultName.value);
+  }
 }
 
 function printHtml() {
@@ -185,7 +189,7 @@ function printHtml() {
           Kiểm tra lại
         </c-button>
       </div>
-      <div text-xs op-60 mt-1>
+      <div mt-1 text-xs op-60>
         Đổi endpoint bằng biến môi trường <code>VITE_CONVERTER_API_URL</code> khi build.
       </div>
     </c-card>
@@ -193,7 +197,7 @@ function printHtml() {
     <c-card v-if="activeTab === 'text2pdf'" title="Text / Markdown → PDF (local)">
       <c-input-text v-model:value="pdfTitle" label="Tên file" placeholder="document" />
       <c-input-text v-model:value="mdText" label="Nội dung" multiline rows="12" placeholder="# Hello" mt-3 />
-      <div flex gap-2 mt-3>
+      <div mt-3 flex gap-2>
         <c-button type="primary" :disabled="isWorking" @click="textToPdf">
           {{ isWorking ? 'Đang tạo...' : 'Tạo PDF' }}
         </c-button>
@@ -201,7 +205,7 @@ function printHtml() {
           Tải {{ resultName }} {{ resultSize ? `(${formatBytes(resultSize)})` : '' }}
         </c-button>
       </div>
-      <iframe v-if="resultUrl" :src="resultUrl" w-full h-500px mt-3 border rounded />
+      <iframe v-if="resultUrl" :src="resultUrl" mt-3 h-500px w-full border rounded />
       <c-alert mt-3 type="info">
         Bản local chỉ render text đơn giản (chưa hỗ trợ tiếng Việt có dấu đầy đủ với font Helvetica — backend LibreOffice sẽ giữ font tốt hơn). Muốn giữ format đẹp: dùng tab Office→PDF với file .md/.html.
       </c-alert>
@@ -217,7 +221,7 @@ function printHtml() {
           Xóa
         </c-button>
       </div>
-      <div flex gap-2 mt-3>
+      <div mt-3 flex gap-2>
         <c-button type="primary" :disabled="isWorking || !officeFiles.length" @click="officeToPdf">
           {{ isWorking ? 'Backend đang convert...' : 'Convert → PDF' }}
         </c-button>
@@ -238,7 +242,7 @@ function printHtml() {
       <div mt-3>
         <c-buttons-select v-model:value="pdfJob" :options="[{ label: 'Trích text', value: 'text' }, { label: 'Xuất ảnh từng trang (zip)', value: 'images' }]" />
       </div>
-      <div flex gap-2 mt-3>
+      <div mt-3 flex gap-2>
         <c-button type="primary" :disabled="isWorking || !pdfFile" @click="pdfToOther">
           {{ isWorking ? 'Đang xử lý...' : 'Chạy' }}
         </c-button>
