@@ -77,6 +77,18 @@ function clearAll() {
   items.value = [];
 }
 
+function removeItem(id: string) {
+  const idx = items.value.findIndex(i => i.id === id);
+  if (idx === -1) {
+    return;
+  }
+  const [rm] = items.value.splice(idx, 1);
+  URL.revokeObjectURL(rm.url);
+  if (rm.outUrl) {
+    URL.revokeObjectURL(rm.outUrl);
+  }
+}
+
 function buildArgs(input: string, output: string, fmt: AudioFmt): string[] {
   const args = ['-y', '-i', input];
   const ss = parseTimeToSeconds(trimStart.value);
@@ -264,8 +276,13 @@ function downloadOne(it: AudioItem) {
             <div truncate font-medium>
               {{ it.file.name }} • {{ formatBytes(it.file.size) }} <span v-if="it.duration">• {{ formatTime(it.duration) }}</span>
             </div>
-            <div text-sm>
-              {{ it.status }}
+            <div flex shrink-0 items-center gap-2>
+              <div text-sm>
+                {{ it.status }}
+              </div>
+              <c-button size="small" @click="removeItem(it.id)">
+                Xóa
+              </c-button>
             </div>
           </div>
           <audio :src="it.url" controls mt-2 w-full />

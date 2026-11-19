@@ -17,6 +17,7 @@ interface VItem {
   outSize: number | null
   status: 'ready' | 'working' | 'done' | 'error'
   error?: string
+  sentKey: string | null
 }
 
 const { ensureLoaded, isLoading, loadError, progress, isSupported } = useFfmpeg();
@@ -59,7 +60,7 @@ const resOptions = [
 function onFiles(files: File[]) {
   for (const f of files) {
     const url = URL.createObjectURL(f);
-    items.value.push({ id: uid(), file: f, url, outUrl: null, outBlob: null, outSize: null, status: 'ready' });
+    items.value.push({ id: uid(), file: f, url, outUrl: null, outBlob: null, outSize: null, status: 'ready', sentKey: null });
   }
 }
 function onSingle(f: File) {
@@ -73,6 +74,18 @@ function clearAll() {
     }
   }
   items.value = [];
+}
+
+function removeItem(id: string) {
+  const idx = items.value.findIndex(i => i.id === id);
+  if (idx === -1) {
+    return;
+  }
+  const [rm] = items.value.splice(idx, 1);
+  URL.revokeObjectURL(rm.url);
+  if (rm.outUrl) {
+    URL.revokeObjectURL(rm.outUrl);
+  }
 }
 
 function move(idx: number, dir: -1 | 1) {
@@ -169,7 +182,13 @@ async function sendBackendJobs() {
       log.value = `Đã gửi job gộp #${job.id}\n`;
     }
     else {
-      for (const it of items.value) {
+      const key = `${targetFormat.value}|${trimEnabled.value ? `${trimStart.value}>${trimDuration.value}` : ''}`;
+      const pending = items.value.filter(it => it.sentKey !== key);
+      if (!pending.length) {
+        log.value = 'Tất cả file đã được gửi job với tùy chọn hiện tại rồi (xem Job Center). Đổi định dạng, xóa bớt hoặc thêm file mới để gửi tiếp.';
+        return;
+      }
+      for (const it of pending) {
         const job = await startMediaJob({
           files: [it.file],
           format: targetFormat.value,
@@ -178,6 +197,7 @@ async function sendBackendJobs() {
           trimStart: trimEnabled.value ? trimStart.value : '',
           trimDuration: trimEnabled.value ? trimDuration.value : '',
         });
+        it.sentKey = key;
         jobStore.track(job.id, `${it.file.name} → ${targetFormat.value.toUpperCase()}`);
         log.value += `Đã gửi job #${job.id} cho ${it.file.name}\n`;
       }
@@ -352,13 +372,21 @@ function downloadOne(it: VItem) {
           <div flex items-center justify-between gap-2>
             <div truncate font-medium>
               {{ i + 1 }}. {{ it.file.name }} • {{ formatBytes(it.file.size) }}
+              <n-tag v-if="it.sentKey" size="small" type="success" ml-1>
+                đã gửi job
+              </n-tag>
             </div>
-            <div v-if="items.length > 1" flex shrink-0 gap-1>
-              <c-button size="small" :disabled="i === 0" @click="move(i, -1)">
-                ↑
-              </c-button>
-              <c-button size="small" :disabled="i === items.length - 1" @click="move(i, 1)">
-                ↓
+            <div flex shrink-0 gap-1>
+              <template v-if="items.length > 1">
+                <c-button size="small" :disabled="i === 0" @click="move(i, -1)">
+                  ↑
+                </c-button>
+                <c-button size="small" :disabled="i === items.length - 1" @click="move(i, 1)">
+                  ↓
+                </c-button>
+              </template>
+              <c-button size="small" @click="removeItem(it.id)">
+                Xóa
               </c-button>
             </div>
           </div>

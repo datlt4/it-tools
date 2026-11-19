@@ -214,11 +214,14 @@ function printHtml() {
     <c-card v-if="activeTab === 'office2pdf'" title="Office / HTML / MD → PDF (backend LibreOffice)">
       <c-file-upload multiple accept=".docx,.doc,.pptx,.ppt,.xlsx,.xls,.odt,.ods,.odp,.html,.htm,.md,.txt,.rtf" title="Kéo thả docx/pptx/xlsx/md/html..." @files-upload="onOffice" />
       <div v-if="officeFiles.length" mt-2 text-sm>
-        <div v-for="(f, i) in officeFiles" :key="i">
-          {{ f.name }} • {{ formatBytes(f.size) }}
+        <div v-for="(f, i) in officeFiles" :key="`${f.name}-${f.size}`" flex items-center justify-between gap-2>
+          <span truncate>{{ f.name }} • {{ formatBytes(f.size) }}</span>
+          <c-button size="small" @click="officeFiles.splice(i, 1)">
+            Xóa
+          </c-button>
         </div>
         <c-button size="small" mt-2 @click="officeFiles = []">
-          Xóa
+          Xóa tất cả
         </c-button>
       </div>
       <div mt-3 flex gap-2>
