@@ -71,22 +71,22 @@ def _ffprobe_duration(path: Path) -> float | None:
 
 
 def _media_encode_args(fmt: str, crf: int = 23, resolution: str = 'original',
-                       fps: int = 15, gif_width: int = 480) -> list[str]:
+                       bitrate: str = '192k', fps: int = 15, gif_width: int = 480) -> list[str]:
     if fmt == 'mp4':
         args = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', str(crf),
                 '-c:a', 'aac', '-b:a', '128k']
     elif fmt == 'webm':
         args = ['-c:v', 'libvpx-vp9', '-b:v', '1M', '-c:a', 'libopus']
     elif fmt == 'mp3':
-        return ['-vn', '-c:a', 'libmp3lame', '-b:a', '192k']
+        return ['-vn', '-c:a', 'libmp3lame', '-b:a', bitrate]
     elif fmt == 'gif':
         return ['-vf', f'fps={fps},scale={gif_width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse']
     elif fmt == 'wav':
         return ['-c:a', 'pcm_s16le']
     elif fmt == 'ogg':
-        return ['-c:a', 'libvorbis', '-b:a', '192k']
+        return ['-c:a', 'libvorbis', '-b:a', bitrate]
     elif fmt == 'm4a':
-        return ['-c:a', 'aac', '-b:a', '192k']
+        return ['-c:a', 'aac', '-b:a', bitrate]
     elif fmt == 'flac':
         return ['-c:a', 'flac']
     else:
@@ -139,7 +139,10 @@ def _run_media_job(job_id: str):
             cmd += ['-t', str(job['trim_duration'])]
         out_name = f"output.{job['format']}"
         cmd += _media_encode_args(job['format'], job.get('crf', 23),
-                                 job.get('resolution', 'original')) + [str(workdir / out_name)]
+                                 job.get('resolution', 'original'),
+                                 bitrate=job.get('bitrate', '192k'),
+                                 fps=job.get('fps', 15),
+                                 gif_width=job.get('gif_width', 480)) + [str(workdir / out_name)]
         job['cmd'] = ' '.join(cmd)
 
         proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, bufsize=1,
@@ -217,6 +220,9 @@ async def create_media_job(
     trim_start: str = Form(''),
     trim_duration: str = Form(''),
     merge: bool = Form(False),
+    bitrate: str = Form('192k'),
+    fps: int = Form(15),
+    gif_width: int = Form(480),
 ):
     """Tạo job ffmpeg chạy nền: convert 1 file hoặc merge nhiều file theo thứ tự."""
     fmt = format.lower().strip()
@@ -245,6 +251,8 @@ async def create_media_job(
         'workdir': workdir, 'inputs': names, 'merge': merge or len(names) > 1,
         'crf': max(0, min(51, crf)), 'resolution': resolution,
         'trim_start': trim_start.strip(), 'trim_duration': trim_duration.strip(),
+        'bitrate': bitrate.strip() or '192k',
+        'fps': max(1, min(60, fps)), 'gif_width': max(160, min(1280, gif_width)),
     }
     with _jobs_lock:
         _jobs[job_id] = job

@@ -390,10 +390,10 @@ tools:
     description: Convert PNG/JPG/WEBP, resize, nén và xoay ảnh ngay trên trình duyệt.
   audio-converter:
     title: Convert audio
-    description: Convert mp3/wav/ogg/m4a/flac, cắt và nối audio bằng ffmpeg.wasm.
+    description: Convert mp3/wav/ogg/m4a/flac, cắt và nối audio bằng job backend.
   video-converter:
     title: Convert video
-    description: Convert mp4/webm, cắt đoạn, tách mp3 và tạo GIF ngay trên trình duyệt.
+    description: Convert mp4/webm, cắt đoạn, tách mp3 và tạo GIF bằng job backend.
   pdf-toolbox:
     title: Công cụ PDF
     description: Gộp, tách, xoay PDF và tạo PDF từ ảnh ngay trên trình duyệt.

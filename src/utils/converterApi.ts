@@ -71,6 +71,9 @@ export async function startMediaJob(opts: {
   trimStart?: string
   trimDuration?: string
   merge?: boolean
+  bitrate?: string
+  fps?: number
+  gifWidth?: number
 }): Promise<ConverterJob> {
   const fd = new FormData();
   for (const f of opts.files) {
@@ -82,6 +85,9 @@ export async function startMediaJob(opts: {
   fd.append('trim_start', opts.trimStart ?? '');
   fd.append('trim_duration', opts.trimDuration ?? '');
   fd.append('merge', opts.merge ? 'true' : 'false');
+  fd.append('bitrate', opts.bitrate ?? '192k');
+  fd.append('fps', String(opts.fps ?? 15));
+  fd.append('gif_width', String(opts.gifWidth ?? 480));
   const res = await fetch(`${getConverterApiBase()}/jobs/media`, { method: 'POST', body: fd });
   if (!res.ok) {
     throw new Error(`Backend error ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);

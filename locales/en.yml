@@ -401,10 +401,10 @@ tools:
     description: Convert PNG/JPG/WEBP, resize, compress and rotate images client-side.
   audio-converter:
     title: Audio converter
-    description: Convert mp3/wav/ogg/m4a/flac, trim and merge audio with ffmpeg.wasm.
+    description: Convert mp3/wav/ogg/m4a/flac, trim and merge audio via backend jobs.
   video-converter:
     title: Video converter
-    description: Convert mp4/webm, trim, extract mp3 and create GIF client-side.
+    description: Convert mp4/webm, trim, extract mp3 and create GIF via backend jobs.
   pdf-toolbox:
     title: PDF toolbox
     description: Merge, split, rotate PDFs and create PDF from images client-side.
