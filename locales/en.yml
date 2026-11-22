@@ -411,3 +411,6 @@ tools:
   document-converter:
     title: Document converter
     description: Text/MD to PDF locally, Office to PDF and PDF to text/images via backend.
+  image-stitcher:
+    title: Image stitcher
+    description: Stitch scrolling screenshots or panoramas via backend OpenCV job.

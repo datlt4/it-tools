@@ -54,7 +54,8 @@ _TIME_RE = re.compile(r'time=(\d+):(\d+):([\d.]+)')
 
 MEDIA_MIME = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
               'm4a': 'audio/mp4', 'flac': 'audio/flac', 'mp4': 'video/mp4',
-              'webm': 'video/webm', 'gif': 'image/gif'}
+              'webm': 'video/webm', 'gif': 'image/gif',
+              'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}
 
 
 def _ffprobe_duration(path: Path) -> float | None:
@@ -251,6 +252,154 @@ async def create_media_job(
     return _job_public(job)
 
 
+def _stitch_vertical(images: list, progress_cb) -> 'np.ndarray':
+    """Ghep anh chup man hinh cuon doc: template-match tim overlap."""
+    import cv2
+    import numpy as np
+    canvas = images[0].copy()
+    for i in range(1, len(images)):
+        with _jobs_lock:
+            pass
+        nxt = images[i]
+        gh, gw = canvas.shape[:2]
+        g_canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
+        g_nxt = cv2.cvtColor(nxt, cv2.COLOR_BGR2GRAY)
+        strip = min(400, gh // 2, g_nxt.shape[0] // 2)
+        tpl = g_canvas[gh - strip:, :]
+        res = cv2.matchTemplate(g_nxt, tpl, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, mloc = cv2.minMaxLoc(res)
+        top = mloc[1]
+        if mx < 0.4 or top < 10 or top > g_nxt.shape[0] - 10:
+            add = nxt
+        else:
+            add = nxt[top:, :]
+        canvas = np.vstack([canvas, add])
+        progress_cb(i / len(images))
+    return canvas
+
+
+def _run_stitch_job(job_id: str):
+    import cv2
+    import numpy as np
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return
+        job['status'] = 'running'
+    workdir: Path = job['workdir']
+    try:
+        files = sorted(workdir.glob('img-*'), key=lambda p: p.name)
+        if job.get('order') != 'upload':
+            names: list[str] = job.get('orig_names', [])
+            order_idx = sorted(range(len(files)),
+                               key=lambda i: names[i] if i < len(names) else '')
+            if job.get('order') == 'reverse':
+                order_idx = order_idx[::-1]
+            files = [files[i] for i in order_idx]
+        images = []
+        for f in files:
+            data = np.frombuffer(f.read_bytes(), dtype=np.uint8)
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError(f'Cannot decode {f.name}')
+            images.append(img)
+            with _jobs_lock:
+                if job['status'] == 'canceled':
+                    return
+        if len(images) < 2:
+            raise ValueError('Need at least 2 images')
+
+        def progress_cb(p: float):
+            with _jobs_lock:
+                if job['status'] == 'paused':
+                    pass
+                job['progress'] = max(job.get('progress', 0.0), min(0.99, p))
+            ev = job.get('pause_event')
+            while ev is not None and not ev.is_set():
+                if job.get('status') == 'canceled':
+                    raise InterruptedError('canceled')
+                time.sleep(0.2)
+
+        if job.get('mode') == 'panorama':
+            stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
+            status, pano = stitcher.stitch(images)
+            if status != cv2.Stitcher_OK:
+                stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
+                status, pano = stitcher.stitch(images)
+            if status != cv2.Stitcher_OK:
+                raise ValueError(f'Stitcher failed (code {status}), thử chế độ cuộn dọc')
+            result = pano
+            progress_cb(1.0)
+        else:
+            result = _stitch_vertical(images, progress_cb)
+
+        fmt = job['format']
+        out_name = f'output.{fmt}'
+        ok = cv2.imwrite(str(workdir / out_name), result,
+                         [int(cv2.IMWRITE_JPEG_QUALITY), 92] if fmt == 'jpg' else [])
+        if not ok:
+            raise ValueError('Cannot write output')
+        with _jobs_lock:
+            if job['status'] == 'canceled':
+                return
+            job['status'] = 'done'
+            job['progress'] = 1.0
+            job['out_filename'] = f'stitched.{fmt}'
+            job['out_size'] = (workdir / out_name).stat().st_size
+    except InterruptedError:
+        pass
+    except Exception as e:
+        with _jobs_lock:
+            if job['status'] != 'canceled':
+                job['status'] = 'error'
+                job['error'] = str(e)[:500]
+    finally:
+        _cleanup_jobs()
+
+
+@app.post('/jobs/stitch')
+async def create_stitch_job(
+    files: list[UploadFile] = File(...),
+    mode: str = Form('scroll'),
+    order: str = Form('name'),
+    format: str = Form('jpg'),
+):
+    """Ghep anh: scroll = screenshot cuon doc (template-match), panorama = anh chup."""
+    fmt = format.lower().strip()
+    if fmt not in ('jpg', 'png'):
+        raise HTTPException(400, 'format must be jpg or png')
+    if mode not in ('scroll', 'panorama'):
+        raise HTTPException(400, 'mode must be scroll or panorama')
+    if order not in ('name', 'upload', 'reverse'):
+        raise HTTPException(400, 'order must be name, upload or reverse')
+    if not (2 <= len(files) <= 50):
+        raise HTTPException(400, 'Send 2..50 images')
+    job_id = uuid.uuid4().hex[:12]
+    workdir = JOB_ROOT / job_id
+    workdir.mkdir(parents=True, exist_ok=True)
+    orig_names: list[str] = []
+    for i, f in enumerate(files):
+        data = await f.read()
+        if len(data) > 100 * 1024 * 1024:
+            raise HTTPException(413, f'{f.filename}: file too large (>100MB)')
+        (workdir / f'img-{i:03d}').write_bytes(data)
+        orig_names.append(f.filename or f'img-{i:03d}')
+    job = {
+        'id': job_id, 'name': f'stitch {len(files)} ảnh',
+        'format': fmt, 'status': 'queued', 'progress': 0.0,
+        'created_at': time.time(), 'error': None,
+        'out_filename': None, 'out_size': None,
+        'workdir': workdir, 'inputs': [], 'kind': 'stitch',
+        'mode': mode, 'order': order, 'orig_names': orig_names,
+        'pause_event': threading.Event(),
+    }
+    job['pause_event'].set()
+    with _jobs_lock:
+        _jobs[job_id] = job
+    threading.Thread(target=_run_stitch_job, args=(job_id,), daemon=True).start()
+    return _job_public(job)
+
+
 @app.get('/jobs')
 def list_jobs():
     with _jobs_lock:
@@ -275,6 +424,13 @@ def _signal_job(job_id: str, sig: int, to_status: str):
             job = _jobs.get(job_id)
             if not job:
                 raise HTTPException(404, 'Job not found')
+            if job.get('kind') == 'stitch':
+                # job python thuần: đảo cờ pause, worker tự nhường
+                job['status'] = to_status
+                ev: threading.Event = job.get('pause_event')
+                if ev is not None:
+                    ev.clear() if to_status == 'paused' else ev.set()
+                return _job_public(job)
             if job['status'] not in ('running', 'paused', 'queued'):
                 raise HTTPException(409, f'Job is {job["status"]}, cannot change state')
             proc = job.get('proc')

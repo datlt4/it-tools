@@ -128,3 +128,23 @@ export async function deleteJob(id: string): Promise<void> {
 export function jobDownloadUrl(id: string): string {
   return `${getConverterApiBase()}/jobs/${id}/download`;
 }
+
+export async function startStitchJob(opts: {
+  files: File[]
+  mode?: string
+  order?: string
+  format?: string
+}): Promise<ConverterJob> {
+  const fd = new FormData();
+  for (const f of opts.files) {
+    fd.append('files', f, f.name);
+  }
+  fd.append('mode', opts.mode ?? 'scroll');
+  fd.append('order', opts.order ?? 'name');
+  fd.append('format', opts.format ?? 'jpg');
+  const res = await fetch(`${getConverterApiBase()}/jobs/stitch`, { method: 'POST', body: fd });
+  if (!res.ok) {
+    throw new Error(`Backend error ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  }
+  return await res.json();
+}

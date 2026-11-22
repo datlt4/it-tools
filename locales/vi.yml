@@ -400,3 +400,6 @@ tools:
   document-converter:
     title: Convert tài liệu
     description: Text/MD thành PDF local, Office thành PDF và PDF thành text/ảnh qua backend.
+  image-stitcher:
+    title: Ghép ảnh
+    description: Ghép screenshot cuộn dọc hoặc panorama qua job backend OpenCV.
