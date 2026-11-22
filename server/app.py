@@ -253,29 +253,88 @@ async def create_media_job(
 
 
 def _stitch_vertical(images: list, progress_cb) -> 'np.ndarray':
-    """Ghep anh chup man hinh cuon doc: template-match tim overlap."""
+    """Ghep screenshot cuon doc: bo header/footer tinh, tim do cuon giua cac anh."""
     import cv2
     import numpy as np
-    canvas = images[0].copy()
-    for i in range(1, len(images)):
-        with _jobs_lock:
-            pass
-        nxt = images[i]
-        gh, gw = canvas.shape[:2]
-        g_canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
-        g_nxt = cv2.cvtColor(nxt, cv2.COLOR_BGR2GRAY)
-        strip = min(400, gh // 2, g_nxt.shape[0] // 2)
-        tpl = g_canvas[gh - strip:, :]
-        res = cv2.matchTemplate(g_nxt, tpl, cv2.TM_CCOEFF_NORMED)
-        _, mx, _, mloc = cv2.minMaxLoc(res)
-        top = mloc[1]
-        if mx < 0.4 or top < 10 or top > g_nxt.shape[0] - 10:
-            add = nxt
-        else:
-            add = nxt[top:, :]
-        canvas = np.vstack([canvas, add])
-        progress_cb(i / len(images))
-    return canvas
+    h = min(im.shape[0] for im in images)
+    w = min(im.shape[1] for im in images)
+    images = [im[:h, :w] for im in images]
+    grays = [cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.int16) for im in images]
+    # pixel "dong" = khac nhau o it nhat 1 cap anh lien tiep
+    diff = np.zeros((h, w), np.int16)
+    for a, b in zip(grays, grays[1:]):
+        diff = np.maximum(diff, np.abs(a - b))
+    moving = diff > 25
+    row_dyn = np.append(moving.mean(1) > 0.02, False)
+    col_dyn = np.where(moving.mean(0) > 0.02)[0]
+    # vung cuon = doan hang dong dai nhat (cho phep khe nho), ngoai ra la header/footer
+    y0, y1, start, gap = 0, h, None, 0
+    for y, dyn in enumerate(row_dyn):
+        if dyn:
+            start, gap = (y if start is None else start), 0
+        elif start is not None:
+            gap += 1
+            if gap > h // 50 or y == h:
+                end = y - gap + 1
+                if (y0, y1) == (0, h) or end - start > y1 - y0:
+                    y0, y1 = start, end
+                start, gap = None, 0
+    rh = y1 - y0
+    x0, x1 = (col_dyn[0], col_dyn[-1] + 1) if len(col_dyn) else (0, w)
+
+    def score(a, b, dy):
+        # a[dy:] khop b[:-dy]; chi tinh pixel co noi dung de nen trong khong lam diem thap gia
+        x, y = a[dy:], b[:a.shape[0] - dy]
+        ink = np.maximum(x, y) > 40
+        n = ink.sum()
+        return float(np.abs(x - y)[ink].sum() / n) if n > ink.size * 0.01 else 1e9
+
+    s = 4
+    small = [cv2.resize(g[y0:y1, x0:x1].astype(np.uint8), None, fx=1 / s, fy=1 / s,
+                        interpolation=cv2.INTER_AREA).astype(np.float32) for g in grays]
+    min_ov = max(8, rh // 10)
+    offsets = []
+    for i in range(len(images) - 1):
+        a, b = small[i], small[i + 1]
+        d = int(np.argmin([score(a, b, k) for k in range(a.shape[0] - min_ov // s)])) * s
+        A = grays[i][y0:y1, x0:x1].astype(np.float32)
+        B = grays[i + 1][y0:y1, x0:x1].astype(np.float32)
+        d = min(range(max(0, d - s), min(rh - min_ov, d + s) + 1), key=lambda k: score(A, B, k))
+        offsets.append(d)
+        progress_cb((i + 1) / len(images))
+
+    tops = np.concatenate([[0], np.cumsum(offsets)]).astype(int)
+    total = tops[-1] + rh
+    reg = [im[y0:y1] for im in images]
+    # nut noi (mui ten, play, thanh cuon...) co dinh tren man hinh: o (hang, dai cot)
+    # nao hay lech giua 2 anh chong lap thi bi phat -> lay o do tu anh khac
+    bw = 64
+    nb = (w + bw - 1) // bw
+    votes = np.zeros((rh, nb), np.float32)
+    for i, d in enumerate(offsets):
+        a, b = reg[i][d:].astype(np.int16), reg[i + 1][:rh - d].astype(np.int16)
+        bad = (np.abs(a - b).max(2) > 12).astype(np.float32)
+        bad = np.pad(bad, ((0, 0), (0, nb * bw - w))).reshape(rh - d, nb, bw).sum(2)
+        votes[d:] += bad
+        votes[:rh - d] += bad
+    votes = cv2.dilate(votes, np.ones((31, 3), np.uint8))
+    # uu tien giua anh: mep vung cuon hay dinh bong do cua header/footer
+    pen = np.abs(np.arange(rh) - rh / 2) / rh
+    pen[:rh // 8] += 30
+    pen[-(rh // 8):] += 30
+    cost = votes + pen[:, None]
+    best = np.full((total, nb), np.inf, np.float32)
+    src = np.zeros((total, nb), int)
+    for i in range(len(reg)):
+        sl = slice(tops[i], tops[i] + rh)
+        take = cost < best[sl]
+        best[sl][take], src[sl][take] = cost[take], i
+    content = np.zeros((total, w, 3), np.uint8)
+    for i in range(len(reg)):
+        sl = slice(tops[i], tops[i] + rh)
+        m = np.repeat(src[sl] == i, bw, axis=1)[:, :w]
+        content[sl][m] = reg[i][m]
+    return np.vstack([images[0][:y0], content, images[-1][y1:]])
 
 
 def _run_stitch_job(job_id: str):
