@@ -326,22 +326,58 @@ def _stitch_vertical(images: list, progress_cb) -> 'np.ndarray':
         votes[d:] += bad
         votes[:rh - d] += bad
     votes = cv2.dilate(votes, np.ones((31, 3), np.uint8))
+    # nut noi co dinh: 2 anh lien tiep giong nhau tai cung vi tri man hinh
+    # trong khi noi dung tuong ung (da cuon) lai khac -> danh dau o ca 2 anh
+    bg = np.median(np.concatenate([r[::16, ::16].reshape(-1, 3) for r in reg]), axis=0)
+    fixed = [np.zeros((rh, w), bool) for _ in reg]
+    k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    k3 = np.ones((3, 3), np.uint8)
+
+    def grow(core, cand):
+        # mo rong loi -> ca vung "khac noi dung" lien thong (vien/bong cua nut)
+        n, lab = cv2.connectedComponents(cv2.dilate((cand | core).astype(np.uint8), k3))
+        keep = np.isin(lab, np.unique(lab[core])) & (lab > 0)
+        return cv2.dilate(keep.astype(np.uint8), np.ones((11, 11), np.uint8)).astype(bool)
+
+    for i, d in enumerate(offsets):
+        a, b = reg[i].astype(np.int16), reg[i + 1].astype(np.int16)
+        ink_a, ink_b = np.abs(a - bg).max(2) > 20, np.abs(b - bg).max(2) > 20
+        same = (np.abs(a - b).max(2) < 16) & ink_a & ink_b
+        diff = np.abs(a[d:] - b[:rh - d]).max(2) > 30
+        moved_a, moved_b = np.zeros((rh, w), bool), np.zeros((rh, w), bool)
+        moved_a[d:], moved_b[:rh - d] = diff, diff
+        core = cv2.morphologyEx((same & (moved_a | moved_b)).astype(np.uint8),
+                                cv2.MORPH_OPEN, k_open).astype(bool)
+        if core.any():
+            # ngoai vung chong lap khong co "noi dung tuong ung" -> dung dieu kien giong nhau
+            near = np.abs(a - b).max(2) < 16
+            out_a, out_b = np.ones(rh, bool), np.ones(rh, bool)
+            out_a[d:], out_b[:rh - d] = False, False
+            fixed[i] |= grow(core, (moved_a | (near & out_a[:, None])) & (np.abs(a - bg).max(2) > 8))
+            fixed[i + 1] |= grow(core, (moved_b | (near & out_b[:, None])) & (np.abs(b - bg).max(2) > 8))
     # uu tien giua anh: mep vung cuon hay dinh bong do cua header/footer
     pen = np.abs(np.arange(rh) - rh / 2) / rh
-    pen[:rh // 8] += 30
-    pen[-(rh // 8):] += 30
+    pen[:rh // 8] += 500
+    pen[-(rh // 8):] += 500
     cost = votes + pen[:, None]
     best = np.full((total, nb), np.inf, np.float32)
     src = np.zeros((total, nb), int)
     for i in range(len(reg)):
         sl = slice(tops[i], tops[i] + rh)
-        take = cost < best[sl]
-        best[sl][take], src[sl][take] = cost[take], i
+        f = np.pad(fixed[i], ((0, 0), (0, nb * bw - w))).reshape(rh, nb, bw).any(2)
+        c = cost + f * 1e4
+        take = c < best[sl]
+        best[sl][take], src[sl][take] = c[take], i
     content = np.zeros((total, w, 3), np.uint8)
     for i in range(len(reg)):
         sl = slice(tops[i], tops[i] + rh)
         m = np.repeat(src[sl] == i, bw, axis=1)[:, :w]
         content[sl][m] = reg[i][m]
+        # khong anh nao khac phu cho nay -> to mau nen de xoa nut
+        # (bo qua nut cham mep vung cuon, vi phan con lai nam trong header/footer)
+        n, lab = cv2.connectedComponents(fixed[i].astype(np.uint8))
+        edge = np.unique(np.concatenate([lab[0], lab[-1]]))
+        content[sl][m & fixed[i] & ~np.isin(lab, edge)] = bg
     return np.vstack([images[0][:y0], content, images[-1][y1:]])
 
 
